@@ -11,7 +11,7 @@ var app = http.createServer(function(req, res) {
 var socket = require('socket.io').listen(app);
 socket.on('connection', function(socket) {
   socket.on('setPosition', function(pos) {
-    console.log(pos.lat + " " + pos.lng);
+    console.log(pos.lat + "," + pos.lng + ",157.1");
   }); 
 });
 

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Simple Map</title>
+    <title>GPS Simulator</title>
     <meta name="viewport" content="initial-scale=1.0">
     <meta charset="utf-8">
     <style>
@@ -29,11 +29,11 @@
         var socket = io();
 	google.maps.event.addListener(map, 'click', function(event) {
 	    socket.emit('setPosition', event.latLng);
-	    new google.maps.InfoWindow({
+	    /* new google.maps.InfoWindow({
 	      position: event.latLng,
 	      content: event.latLng.toString() 
 	    }).open(map);
-	    
+	    */
 	});
     }
     </script>

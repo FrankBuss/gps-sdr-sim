@@ -1,5 +1,7 @@
 #define _CRT_SECURE_NO_DEPRECATE
 
+#include <unistd.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +14,7 @@
 #include <unistd.h>
 #endif
 #include "gpssim.h"
+#include </usr/include/linux/fcntl.h>
 
 int sinTable512[] = {
 	   2,   5,   8,  11,  14,  17,  20,  23,  26,  29,  32,  35,  38,  41,  44,  47,
@@ -1387,6 +1390,27 @@ void usage(void)
 	return;
 }
 
+double llh[3];
+double xyz[USER_MOTION_SIZE][3];
+	
+pthread_mutex_t coordinateMutex;
+
+void *readStdin(void *tid) 
+{
+	printf("readStdin thread started\n");
+	fflush(stdout);
+	while (1) {
+		fscanf(stdin, "%lf,%lf,%lf", &llh[0], &llh[1], &llh[2]);
+		printf(" new coordinate: %lf %lf %lf\n", llh[0], llh[1], llh[2]);
+		fflush(stdout);
+		pthread_mutex_lock(&coordinateMutex);
+		llh[0] = llh[0] / R2D; // convert to RAD
+		llh[1] = llh[1] / R2D; // convert to RAD
+		llh2xyz(llh, xyz[1]);
+		pthread_mutex_unlock(&coordinateMutex);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	clock_t tstart,tend;
@@ -1397,8 +1421,6 @@ int main(int argc, char *argv[])
 	int neph,ieph;
 	ephem_t eph[EPHEM_ARRAY_SIZE][MAX_SAT];
 	gpstime_t g0;
-	
-	double llh[3];
 	
 	int i;
 	channel_t chan[MAX_CHAN];
@@ -1416,7 +1438,6 @@ int main(int argc, char *argv[])
 	int iumd;
 	int numd;
 	char umfile[MAX_CHAR];
-	double xyz[USER_MOTION_SIZE][3];
 
 	int staticLocationMode = FALSE;
 	int nmeaGGA = FALSE;
@@ -1444,7 +1465,11 @@ int main(int argc, char *argv[])
 	double duration;
 	int iduration;
 	int verb;
-
+	
+	int tids;
+	pthread_t thread;
+	pthread_attr_t attr;
+  
 	////////////////////////////////////////////////////////////
 	// Read options
 	////////////////////////////////////////////////////////////
@@ -1729,6 +1754,11 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	if (fcntl(fileno(fp), F_SETPIPE_SZ, 1024 * 1024) < 0)
+	{
+		printf("WARNING: pipe size failed.\n");
+	}
+    
 	////////////////////////////////////////////////////////////
 	// Initialize channels
 	////////////////////////////////////////////////////////////
@@ -1770,8 +1800,25 @@ int main(int argc, char *argv[])
 	// Update receiver time
 	grx.sec += 0.1;
 
-	for (iumd=1; iumd<numd; iumd++)
+	// initial coordinates
+	xyz[1][0] = xyz[0][0];
+	xyz[1][1] = xyz[0][1];
+	xyz[1][2] = xyz[0][2];
+	
+	// create mutex and start stdin read thread
+	pthread_mutex_init(&coordinateMutex, NULL);	
+	pthread_attr_init(&attr);
+	pthread_create(&thread, &attr, readStdin, (void *) &tids);
+
+	iumd=1;
+	while (1)
 	{
+		pthread_mutex_lock(&coordinateMutex);
+		xyz[0][0] = xyz[1][0];
+		xyz[0][1] = xyz[1][1];
+		xyz[0][2] = xyz[1][2];
+		pthread_mutex_unlock(&coordinateMutex);
+
 		for (i=0; i<MAX_CHAN; i++)
 		{
 			if (chan[i].prn>0)
@@ -1781,7 +1828,7 @@ int main(int argc, char *argv[])
 				range_t rho;
 
 				// Current pseudorange
-				computeRange(&rho, eph[ieph][sv], grx, xyz[iumd]);
+				computeRange(&rho, eph[ieph][sv], grx, xyz[0]);
 				chan[i].azel[0] = rho.azel[0];
 				chan[i].azel[1] = rho.azel[1];
 
@@ -1903,7 +1950,7 @@ int main(int argc, char *argv[])
 					generateNavMsg(grx, &chan[i], 0);
 
 			// Update channel allocation
-			allocateChannel(chan, eph[ieph], grx, xyz[iumd], elvmask);
+			allocateChannel(chan, eph[ieph], grx, xyz[0], elvmask);
 
 			// Show ditails about simulated channels
 			if (verb)
@@ -1924,6 +1971,8 @@ int main(int argc, char *argv[])
 		// Update time counter
 		printf("\rTime into run = %4.1f", grx.sec-g0.sec);
 		fflush(stdout);
+		
+		iumd++;
 	}
 
 	tend = clock();
